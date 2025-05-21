@@ -2,7 +2,6 @@ import os
 import json
 from flask import Flask, request
 from pyrogram import Client, filters
-from pyrogram.types import Message
 
 API_ID = int(os.environ.get("API_ID"))
 API_HASH = os.environ.get("API_HASH")
@@ -10,14 +9,14 @@ BOT_TOKEN = os.environ.get("BOT_TOKEN")
 BASE_URL = os.environ.get("BASE_URL")  # example: https://yourapp.onrender.com
 
 app = Flask(__name__)
-
 bot = Client("bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
-# Data persistence
 DATA_FILE = "channels.json"
+
+# Ensure data file exists
 if not os.path.exists(DATA_FILE):
     with open(DATA_FILE, "w") as f:
-        json.dump({"sources": [], "targets": [], "shortener": None}, f)
+        json.dump({"sources": [], "targets": []}, f)
 
 def load_data():
     with open(DATA_FILE) as f:
@@ -27,11 +26,12 @@ def save_data(data):
     with open(DATA_FILE, "w") as f:
         json.dump(data, f, indent=2)
 
-# Bot Commands
+# Start Command
 @bot.on_message(filters.command("start") & filters.private)
-async def start_cmd(client, message):
-    await message.reply("Bot is running and ready to auto-forward!")
+async def start(client, message):
+    await message.reply("Bot is running!\nUse /connect <source_channel> to add source channel.\nUse /addtarget <target_channel> to add target channel.\nUse /list to see current channels.")
 
+# Connect source channel
 @bot.on_message(filters.command("connect") & filters.private)
 async def connect_source(client, message):
     data = load_data()
@@ -40,12 +40,13 @@ async def connect_source(client, message):
         if source not in data["sources"]:
             data["sources"].append(source)
             save_data(data)
-            await message.reply(f"Connected to source: {source}")
+            await message.reply(f"Source channel {source} added!")
         else:
-            await message.reply("Already connected to this source.")
+            await message.reply("Source channel already added.")
     except:
         await message.reply("Usage: /connect <source_channel>")
 
+# Add target channel
 @bot.on_message(filters.command("addtarget") & filters.private)
 async def add_target(client, message):
     data = load_data()
@@ -54,78 +55,44 @@ async def add_target(client, message):
         if target not in data["targets"]:
             data["targets"].append(target)
             save_data(data)
-            await message.reply(f"Target added: {target}")
+            await message.reply(f"Target channel {target} added!")
         else:
-            await message.reply("Target already exists.")
+            await message.reply("Target channel already added.")
     except:
         await message.reply("Usage: /addtarget <target_channel>")
 
-@bot.on_message(filters.command("setshortener") & filters.private)
-async def set_shortener(client, message):
-    data = load_data()
-    try:
-        short_api = message.text.split(None, 1)[1]
-        data["shortener"] = short_api
-        save_data(data)
-        await message.reply("Shortener API set successfully.")
-    except:
-        await message.reply("Usage: /setshortener <api_url_with_{{link}}>")
-
+# List channels
 @bot.on_message(filters.command("list") & filters.private)
-async def list_all(client, message):
+async def list_channels(client, message):
     data = load_data()
-    txt = f"Sources: {data['sources']}\nTargets: {data['targets']}\nShortener: {data['shortener']}"
-    await message.reply(txt)
+    text = f"Sources:\n" + "\n".join(data["sources"]) + "\n\nTargets:\n" + "\n".join(data["targets"])
+    await message.reply(text)
 
-# Main auto-forwarder
+# Forward messages from sources to targets
 @bot.on_message(filters.channel)
-async def forwarder(client, message: Message):
+async def forward_messages(client, message):
     data = load_data()
-    source_id = str(message.chat.username or message.chat.id)
-    if source_id not in data["sources"]:
-        return
-
-    text = message.text or message.caption or ""
-    shortener = data.get("shortener")
-    if shortener:
-        words = text.split()
-        new_words = []
-        for word in words:
-            if word.startswith("http"):
-                short = shortener.replace("{{link}}", word)
-                new_words.append(short)
-            else:
-                new_words.append(word)
-        text = " ".join(new_words)
-
-    for target in data["targets"]:
-        try:
-            if message.text:
-                await client.send_message(target, text)
-            elif message.photo:
-                await client.send_photo(target, photo=message.photo.file_id, caption=text)
-            elif message.video:
-                await client.send_video(target, video=message.video.file_id, caption=text)
-            else:
+    chat_username = "@" + message.chat.username if message.chat.username else str(message.chat.id)
+    if chat_username in data["sources"]:
+        for target in data["targets"]:
+            try:
                 await message.forward(target)
-        except Exception as e:
-            print(f"Error forwarding to {target}: {e}")
+            except Exception as e:
+                print(f"Failed to forward to {target}: {e}")
 
-# Flask route for webhook
+# Flask routes
+@app.route("/", methods=["GET"])
+def index():
+    return "Bot is running!"
+
 @app.route("/bot", methods=["POST"])
 def webhook():
     update = request.get_json()
     bot.process_new_updates([update])
     return "ok"
 
-@app.route("/")
-def index():
-    return "Bot is Live."
-
 if __name__ == "__main__":
+    bot.start()
+    bot.set_webhook(f"{BASE_URL}/bot")
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
-
-# Start bot client
-bot.start()
-bot.set_webhook(f"{BASE_URL}/bot")
