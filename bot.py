@@ -1,76 +1,30 @@
 import os
-import json
-from pyrogram import Client, filters
+from pyrogram import Client
+from flask import Flask, request
 
 API_ID = int(os.environ.get("API_ID"))
 API_HASH = os.environ.get("API_HASH")
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
+BASE_URL = os.environ.get("BASE_URL")  # example: https://yourapp.onrender.com
 
-bot = Client("forwarder", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
+app = Flask(__name__)
 
-DATA_FILE = "channels.json"
+bot = Client("bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
-if not os.path.exists(DATA_FILE):
-    with open(DATA_FILE, "w") as f:
-        json.dump({"sources": [], "targets": []}, f)
+@app.route('/')
+def index():
+    return "Bot is Running!"
 
-def load_data():
-    with open(DATA_FILE) as f:
-        return json.load(f)
+@app.route('/webhook', methods=["POST"])
+def webhook():
+    update = request.get_json()
+    if update:
+        bot.process_update(update)
+    return "ok"
 
-def save_data(data):
-    with open(DATA_FILE, "w") as f:
-        json.dump(data, f, indent=2)
+@app.before_first_request
+def set_webhook():
+    bot.set_webhook(f"{BASE_URL}/webhook")
 
-@bot.on_message(filters.command("start") & filters.private)
-async def start(client, message):
-    await message.reply("Bot is running!\nUse /connect <source_channel>\n/addtarget <target_channel>\n/list")
-
-@bot.on_message(filters.command("connect") & filters.private)
-async def connect_source(client, message):
-    data = load_data()
-    try:
-        source = message.text.split()[1]
-        if source not in data["sources"]:
-            data["sources"].append(source)
-            save_data(data)
-            await message.reply(f"Source {source} added!")
-        else:
-            await message.reply("Source already added.")
-    except:
-        await message.reply("Usage: /connect @sourcechannel")
-
-@bot.on_message(filters.command("addtarget") & filters.private)
-async def add_target(client, message):
-    data = load_data()
-    try:
-        target = message.text.split()[1]
-        if target not in data["targets"]:
-            data["targets"].append(target)
-            save_data(data)
-            await message.reply(f"Target {target} added!")
-        else:
-            await message.reply("Target already added.")
-    except:
-        await message.reply("Usage: /addtarget @targetchannel")
-
-@bot.on_message(filters.command("list") & filters.private)
-async def list_all(client, message):
-    data = load_data()
-    sources = "\n".join(data["sources"]) or "No source yet"
-    targets = "\n".join(data["targets"]) or "No target yet"
-    await message.reply(f"**Sources:**\n{sources}\n\n**Targets:**\n{targets}")
-
-@bot.on_message(filters.channel)
-async def forward(client, message):
-    data = load_data()
-    chat_username = "@" + message.chat.username if message.chat.username else str(message.chat.id)
-    if chat_username in data["sources"]:
-        for target in data["targets"]:
-            try:
-                await message.forward(target)
-            except Exception as e:
-                print(f"Error forwarding to {target}: {e}")
-
-print("Bot starting...")
-bot.run()
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=10000)
