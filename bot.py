@@ -2,6 +2,8 @@ import os
 import json
 import re
 import requests
+from flask import Flask
+from threading import Thread
 from pyrogram import Client, filters
 from pyrogram.types import Message
 
@@ -9,9 +11,9 @@ API_ID = int(os.getenv("API_ID"))
 API_HASH = os.getenv("API_HASH")
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
+app = Flask(__name__)
 DATA_FILE = "channels.json"
 
-# Init JSON
 if not os.path.exists(DATA_FILE):
     with open(DATA_FILE, "w") as f:
         json.dump({"sources": [], "targets": [], "shortener": ""}, f)
@@ -39,10 +41,13 @@ def shorten_links(text):
                 continue
     return text
 
-app = Client("autoforward_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
+bot = Client("forwarder_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
-# Connect source
-@app.on_message(filters.command("connect") & filters.private)
+@bot.on_message(filters.command("start") & filters.private)
+def start_cmd(client, message):
+    message.reply("✅ Auto Forward Bot is Running!")
+
+@bot.on_message(filters.command("connect") & filters.private)
 def connect_channel(client, message: Message):
     data = load_data()
     if len(message.command) < 2:
@@ -55,8 +60,7 @@ def connect_channel(client, message: Message):
     else:
         message.reply("Already connected.")
 
-# Disconnect
-@app.on_message(filters.command("disconnect") & filters.private)
+@bot.on_message(filters.command("disconnect") & filters.private)
 def disconnect_channel(client, message: Message):
     data = load_data()
     if len(message.command) < 2:
@@ -69,8 +73,7 @@ def disconnect_channel(client, message: Message):
     else:
         message.reply("Not found.")
 
-# Add target
-@app.on_message(filters.command("addtarget") & filters.private)
+@bot.on_message(filters.command("addtarget") & filters.private)
 def add_target(client, message: Message):
     data = load_data()
     if len(message.command) < 2:
@@ -83,8 +86,7 @@ def add_target(client, message: Message):
     else:
         message.reply("Already added.")
 
-# Remove target
-@app.on_message(filters.command("removetarget") & filters.private)
+@bot.on_message(filters.command("removetarget") & filters.private)
 def remove_target(client, message: Message):
     data = load_data()
     if len(message.command) < 2:
@@ -97,8 +99,7 @@ def remove_target(client, message: Message):
     else:
         message.reply("Not found.")
 
-# List channels
-@app.on_message(filters.command("list") & filters.private)
+@bot.on_message(filters.command("list") & filters.private)
 def list_channels(client, message: Message):
     data = load_data()
     text = "**✅ Connected Source Channels:**\n"
@@ -107,8 +108,7 @@ def list_channels(client, message: Message):
     text += "\n".join([f"• `{tgt}`" for tgt in data["targets"]]) or "None"
     message.reply(text)
 
-# Set shortener
-@app.on_message(filters.command("setshortener") & filters.private)
+@bot.on_message(filters.command("setshortener") & filters.private)
 def set_shortener(client, message: Message):
     if len(message.command) < 2:
         return message.reply("Usage:\n/setshortener <api_url_with_{{link}}>")
@@ -120,8 +120,7 @@ def set_shortener(client, message: Message):
     save_data(data)
     message.reply("✅ Shortener API set successfully.")
 
-# Show shortener
-@app.on_message(filters.command("shortener") & filters.private)
+@bot.on_message(filters.command("shortener") & filters.private)
 def show_shortener(client, message: Message):
     data = load_data()
     short_api = data.get("shortener", "")
@@ -130,8 +129,7 @@ def show_shortener(client, message: Message):
     else:
         message.reply("No shortener set yet.")
 
-# Forward handler
-@app.on_message(filters.channel)
+@bot.on_message(filters.channel)
 def auto_forward(client, message: Message):
     data = load_data()
     src_id = str(message.chat.id)
@@ -150,4 +148,18 @@ def auto_forward(client, message: Message):
             except Exception as e:
                 print(f"Error to {tgt}: {e}")
 
-app.run()
+# Flask Web Server
+@app.route('/')
+def home():
+    return "✅ Telegram Forward Bot is Running (Flask Web Server Active)."
+
+def run():
+    app.run(host="0.0.0.0", port=int(os.getenv("PORT", 8080)))
+
+def start_bot():
+    bot.run()
+
+# Run both Flask and Bot in threads
+if __name__ == "__main__":
+    Thread(target=run).start()
+    Thread(target=start_bot).start()
